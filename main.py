@@ -23,7 +23,7 @@ app = FastAPI(title="Stock Trend Prediction API")
 # CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allow all for dev, restrict in prod
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -146,6 +146,9 @@ async def forgot_password(data: dict, db: Session = Depends(database.get_db)):
     identifier = data.get("email") or data.get("identifier")
     if not identifier:
         raise HTTPException(status_code=400, detail="Username or Email is required")
+    
+    # Normalize identifier for keying
+    identifier = identifier.strip().lower()
         
     user = crud.get_user_by_username_or_email(db, identifier=identifier)
     if not user or not user.email:
@@ -156,34 +159,37 @@ async def forgot_password(data: dict, db: Session = Depends(database.get_db)):
     code = "".join([str(random.randint(0, 9)) for _ in range(6)])
     expiry = datetime.now() + timedelta(minutes=10)
     
-    reset_codes[email] = {"code": code, "expires": expiry}
+    # Store by identifier provided by user to ensure Step 2/3 work with same input
+    reset_codes[identifier] = {"code": code, "expires": expiry, "email": email}
     
     # Send actual email
     email_sent = send_reset_email(email, code)
     
     print("\n" + "="*50)
-    print(f"RESET CODE FOR {email}: {code} (Email sent: {email_sent})")
+    print(f"RESET CODE FOR {identifier} (Email: {email}): {code} (Email sent: {email_sent})")
     print("="*50 + "\n")
     
     if not email_sent:
-        return {"message": "Development Mode: Security code logged to console (Email configuration required for real sending)"}
+        return {"message": "Development Mode: Security code logged to console"}
         
     return {"message": f"Security code sent to your registered email: {email[:3]}***@{email.split('@')[1]}"}
 
 @app.post("/auth/verify-code")
 async def verify_code(data: dict):
-    email = data.get("email")
+    identifier = data.get("email") or data.get("identifier")
     code = data.get("code")
     
-    if not email or not code:
-        raise HTTPException(status_code=400, detail="Email and code are required")
+    if not identifier or not code:
+        raise HTTPException(status_code=400, detail="Identifier and code are required")
+    
+    identifier = identifier.strip().lower()
         
-    if email not in reset_codes:
-        raise HTTPException(status_code=400, detail="No reset requested for this email")
+    if identifier not in reset_codes:
+        raise HTTPException(status_code=400, detail="No reset requested for this account")
         
-    stored_data = reset_codes[email]
+    stored_data = reset_codes[identifier]
     if datetime.now() > stored_data["expires"]:
-        del reset_codes[email]
+        del reset_codes[identifier]
         raise HTTPException(status_code=400, detail="Code has expired")
         
     if stored_data["code"] != code:
@@ -193,26 +199,34 @@ async def verify_code(data: dict):
 
 @app.post("/auth/reset-password")
 async def reset_password(data: dict, db: Session = Depends(database.get_db)):
-    email = data.get("email")
+    identifier = data.get("email") or data.get("identifier")
     code = data.get("code")
     new_password = data.get("new_password")
     
-    if not email or not code or not new_password:
+    if not identifier or not code or not new_password:
         raise HTTPException(status_code=400, detail="Missing required fields")
+
+    identifier = identifier.strip().lower()
         
-    if email not in reset_codes or reset_codes[email]["code"] != code:
+    if identifier not in reset_codes:
         raise HTTPException(status_code=400, detail="Unauthorized reset attempt")
         
-    user = crud.get_user_by_email(db, email=email)
+    stored_data = reset_codes[identifier]
+    if stored_data["code"] != code:
+         raise HTTPException(status_code=400, detail="Invalid security code")
+
+    user = crud.get_user_by_username_or_email(db, identifier=identifier)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
         
-    crud.update_user_password(db, user=user, new_password=new_password)
-    
-    # Clean up code after use
-    del reset_codes[email]
-    
-    return {"message": "Password updated successfully"}
+    try:
+        crud.update_user_password(db, user=user, new_password=new_password)
+        # Clean up code after use
+        del reset_codes[identifier]
+        return {"message": "Password updated successfully"}
+    except Exception as e:
+        print(f"Error resetting password: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error while updating password")
 
 # --- Stock Routes ---
 @app.get("/stocks", response_model=List[schemas.Stock])
@@ -282,54 +296,63 @@ def remove_from_watchlist(symbol: str, db: Session = Depends(database.get_db), c
         raise HTTPException(status_code=404, detail="Stock not found in watchlist")
     return {"message": "Stock removed from watchlist"}
 
+import time
+
+# Simple cache for popular stocks
+# Format: {"timestamp": 0, "data": {}}
+POPULAR_STOCKS_CACHE = {"timestamp": 0, "data": {}}
+CACHE_DURATION = 300 # 5 minutes
+
 @app.get("/market/popular")
 def get_popular_stocks():
     """
-    Returns a curated catalog of stocks by sector.
+    Returns a curated catalog of stocks by sector with real-time data.
     """
-    return {
-        "Indices": [
-            {"symbol": "^NSEI", "company_name": "NIFTY 50", "price": "21500.00", "change": "+0.5%"},
-            {"symbol": "^BSESN", "company_name": "SENSEX", "price": "71000.00", "change": "+0.4%"},
-        ],
-        "Banking & Finance": [
-            {"symbol": "HDFCBANK", "company_name": "HDFC Bank", "price": "1650.00", "change": "+0.2%"},
-            {"symbol": "ICICIBANK", "company_name": "ICICI Bank", "price": "980.00", "change": "-0.1%"},
-            {"symbol": "SBIN", "company_name": "State Bank of India", "price": "620.00", "change": "+1.1%"},
-            {"symbol": "KOTAKBANK", "company_name": "Kotak Mahoney Bank", "price": "1800.00", "change": "-0.5%"},
-            {"symbol": "AXISBANK", "company_name": "Axis Bank", "price": "1100.00", "change": "+0.8%"},
-            {"symbol": "BAJFINANCE", "company_name": "Bajaj Finance", "price": "7500.00", "change": "+1.5%"},
-            {"symbol": "KTKBANK", "company_name": "Karnataka Bank", "price": "240.00", "change": "+0.5%"},
-             {"symbol": "LICI", "company_name": "LIC India", "price": "900.00", "change": "+0.6%"},
-        ],
-        "Technology (IT)": [
-            {"symbol": "TCS", "company_name": "Tata Consultancy Services", "price": "3800.00", "change": "+0.5%"},
-            {"symbol": "INFY", "company_name": "Infosys", "price": "1500.00", "change": "-0.2%"},
-            {"symbol": "HCLTECH", "company_name": "HCL Technologies", "price": "1400.00", "change": "+1.2%"},
-            {"symbol": "WIPRO", "company_name": "Wipro", "price": "450.00", "change": "-0.8%"},
-            {"symbol": "TECHM", "company_name": "Tech Mahindra", "price": "1200.00", "change": "+0.1%"},
-        ],
-        "Automotive": [
-            {"symbol": "TATAMOTORS", "company_name": "Tata Motors", "price": "800.00", "change": "+2.1%"},
-            {"symbol": "MARUTI", "company_name": "Maruti Suzuki", "price": "10500.00", "change": "-0.5%"},
-            {"symbol": "M&M", "company_name": "Mahindra & Mahindra", "price": "1600.00", "change": "+1.8%"},
-            {"symbol": "EICHERMOT", "company_name": "Eicher Motors", "price": "3800.00", "change": "+0.3%"},
-        ],
-        "Energy & Conglomerates": [
-            {"symbol": "RELIANCE", "company_name": "Reliance Industries", "price": "2600.00", "change": "+0.9%"},
-            {"symbol": "ONGC", "company_name": "ONGC", "price": "200.00", "change": "-1.2%"},
-            {"symbol": "NTPC", "company_name": "NTPC", "price": "300.00", "change": "+0.5%"},
-            {"symbol": "POWERGRID", "company_name": "Power Grid Corp", "price": "230.00", "change": "+0.4%"},
-             {"symbol": "ADANIENT", "company_name": "Adani Enterprises", "price": "3000.00", "change": "-1.5%"},
-        ],
-        "FMCG & Consumer": [
-            {"symbol": "ITC", "company_name": "ITC Limited", "price": "460.00", "change": "+0.2%"},
-            {"symbol": "HINDUNILVR", "company_name": "Hindustan Unilever", "price": "2500.00", "change": "-0.3%"},
-            {"symbol": "NESTLEIND", "company_name": "Nestle India", "price": "25000.00", "change": "+0.1%"},
-            {"symbol": "TITAN", "company_name": "Titan Company", "price": "3600.00", "change": "+1.2%"},
-            {"symbol": "ASIANPAINT", "company_name": "Asian Paints", "price": "3000.00", "change": "-0.8%"},
-        ]
+    current_time = time.time()
+    if current_time - POPULAR_STOCKS_CACHE["timestamp"] < CACHE_DURATION:
+        return POPULAR_STOCKS_CACHE["data"]
+
+    catalog_config = {
+        "Indices": ["^NSEI", "^BSESN"],
+        "Banking & Finance": ["HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "KOTAKBANK.NS", "AXISBANK.NS", "BAJFINANCE.NS", "LICI.NS"],
+        "Technology (IT)": ["TCS.NS", "INFY.NS", "HCLTECH.NS", "WIPRO.NS", "TECHM.NS"],
+        "Automotive": ["TATAMOTORS.NS", "MARUTI.NS", "M&M.NS", "EICHERMOT.NS"],
+        "Energy & Conglomerates": ["RELIANCE.NS", "ONGC.NS", "NTPC.NS", "POWERGRID.NS", "ADANIENT.NS"],
+        "FMCG & Consumer": ["ITC.NS", "HINDUNILVR.NS", "NESTLEIND.NS", "TITAN.NS", "ASIANPAINT.NS"]
     }
+
+    # Map for clean company names (could be in DB, but keeping here for simplicity as config)
+    company_names = {
+        "^NSEI": "NIFTY 50", "^BSESN": "SENSEX",
+        "HDFCBANK.NS": "HDFC Bank", "ICICIBANK.NS": "ICICI Bank", "SBIN.NS": "State Bank of India",
+        "KOTAKBANK.NS": "Kotak Mahindra Bank", "AXISBANK.NS": "Axis Bank", "BAJFINANCE.NS": "Bajaj Finance", "LICI.NS": "LIC India",
+        "TCS.NS": "Tata Consultancy Services", "INFY.NS": "Infosys", "HCLTECH.NS": "HCL Technologies", "WIPRO.NS": "Wipro", "TECHM.NS": "Tech Mahindra",
+        "TATAMOTORS.NS": "Tata Motors", "MARUTI.NS": "Maruti Suzuki", "M&M.NS": "Mahindra & Mahindra", "EICHERMOT.NS": "Eicher Motors",
+        "RELIANCE.NS": "Reliance Industries", "ONGC.NS": "ONGC", "NTPC.NS": "NTPC", "POWERGRID.NS": "Power Grid Corp", "ADANIENT.NS": "Adani Enterprises",
+        "ITC.NS": "ITC Limited", "HINDUNILVR.NS": "Hindustan Unilever", "NESTLEIND.NS": "Nestle India", "TITAN.NS": "Titan Company", "ASIANPAINT.NS": "Asian Paints"
+    }
+
+    all_symbols = [s for sublist in catalog_config.values() for s in sublist]
+    market_data = ml_engine.get_latest_market_data(all_symbols)
+    
+    # Re-organize into sectors
+    data_by_symbol = {item["symbol"]: item for item in market_data}
+    
+    response_data = {}
+    for sector, symbols in catalog_config.items():
+        response_data[sector] = []
+        for sym in symbols:
+            info = data_by_symbol.get(sym, {"price": "N/A", "change": "0.0%"})
+            response_data[sector].append({
+                "symbol": sym.replace(".NS", "").replace(".BO", ""),
+                "company_name": company_names.get(sym, sym),
+                "price": info["price"],
+                "change": info["change"]
+            })
+
+    POPULAR_STOCKS_CACHE["timestamp"] = current_time
+    POPULAR_STOCKS_CACHE["data"] = response_data
+    return response_data
 
 @app.get("/market/history/{symbol}")
 def get_market_history(symbol: str):

@@ -8,11 +8,11 @@ def get_user_by_username(db: Session, username: str):
     return db.query(models.User).filter(models.User.username == username).first()
 
 def get_user_by_email(db: Session, email: str):
-    return db.query(models.User).filter(models.User.email == email).first()
+    return db.query(models.User).filter(models.User.email.ilike(email)).first()
 
 def get_user_by_username_or_email(db: Session, identifier: str):
     return db.query(models.User).filter(
-        (models.User.username == identifier) | (models.User.email == identifier)
+        (models.User.username.ilike(identifier)) | (models.User.email.ilike(identifier))
     ).first()
 
 def create_user(db: Session, user: schemas.UserCreate):

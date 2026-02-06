@@ -38,6 +38,48 @@ def validate_ticker(symbol: str):
             
     return None
 
+def get_latest_market_data(symbols: list):
+    """
+    Fetches the latest price and daily change percentage for a list of symbols.
+    Returns a list of dicts: {"symbol": "...", "price": "...", "change": "..."}
+    """
+    results = []
+    # yfinance can fetch multiple tickers at once
+    tickers_str = " ".join(symbols)
+    try:
+        data = yf.download(tickers_str, period="2d", group_by='ticker', progress=False)
+        for symbol in symbols:
+            try:
+                if len(symbols) > 1:
+                    ticker_data = data[symbol]
+                else:
+                    ticker_data = data
+                
+                if ticker_data.empty or len(ticker_data) < 2:
+                    results.append({"symbol": symbol, "price": "N/A", "change": "0.0%"})
+                    continue
+                
+                # Get last two close prices for change calculation
+                last_close = ticker_data['Close'].iloc[-1]
+                prev_close = ticker_data['Close'].iloc[-2]
+                
+                change_pct = ((last_close - prev_close) / prev_close) * 100
+                change_str = f"{'+' if change_pct >= 0 else ''}{round(change_pct, 2)}%"
+                
+                results.append({
+                    "symbol": symbol,
+                    "price": str(round(last_close, 2)),
+                    "change": change_str
+                })
+            except Exception as e:
+                print(f"Error processing data for {symbol}: {e}")
+                results.append({"symbol": symbol, "price": "N/A", "change": "0.0%"})
+    except Exception as e:
+        print(f"Error downloading market data: {e}")
+        return [{"symbol": s, "price": "N/A", "change": "0.0%"} for s in symbols]
+        
+    return results
+
 def predict_stock_trend(stock_symbol: str, db: Session):
     """
     Predict stock trend using Real-Time data from Yahoo Finance.

@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+sqlalchemy
+pydantic
+python-jose[cryptography]
+passlib[bcrypt]
+scikit-learn
+pandas
+numpy
+python-multipart
+httpx
+yfinance
+psycopg2-binary
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+python-dotenv

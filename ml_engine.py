@@ -5,16 +5,7 @@ import numpy as np
 from sqlalchemy.orm import Session
 import models
 
-def train_model():
-    """
-    Mock function to simulate model training.
-    In a real app, this would be more complex.
-    """
-    print("Training model... (No-op for yfinance heuristic model)")
-    return True
 
-    print("Training model... (No-op for yfinance heuristic model)")
-    return True
 
 def validate_ticker(symbol: str):
     """

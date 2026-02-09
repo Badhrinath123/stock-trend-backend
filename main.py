@@ -21,7 +21,6 @@ models.Base.metadata.create_all(bind=database.engine)
 app = FastAPI(title="Stock Trend Prediction API")
 
 # CORS for frontend
-# CORS for frontend
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -62,8 +61,7 @@ async def read_users_me(current_user: schemas.User = Depends(auth.get_current_us
 
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
-import random
-import string
+
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "1009501543323-240mm0oj17urabqn3htf4lc1g79edt37.apps.googleusercontent.com")
 

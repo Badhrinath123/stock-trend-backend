@@ -21,9 +21,16 @@ models.Base.metadata.create_all(bind=database.engine)
 app = FastAPI(title="Stock Trend Prediction API")
 
 # CORS for frontend
+# CORS for frontend
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    os.getenv("FRONTEND_URL"), # Production URL from Vercel
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], 
+    allow_origins=[origin for origin in origins if origin], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

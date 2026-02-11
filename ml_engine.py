@@ -194,3 +194,41 @@ def predict_stock_trend(stock_symbol: str, db: Session):
             "confidence": 0.0,
             "date": date.today()
         }
+
+def get_market_sentiment(db: Session):
+    """
+    Analyzes NIFTY 50 for sentiment and fetches India VIX.
+    """
+    try:
+        # 1. Fetch India VIX
+        vix_ticker = yf.Ticker("^INDIAVIX")
+        vix_hist = vix_ticker.history(period="1d")
+        vix_val = 0.0
+        if not vix_hist.empty:
+            vix_val = float(vix_hist['Close'].iloc[-1])
+            
+        # 2. Predict NIFTY 50 Trend
+        # We can reuse the predict_stock_trend logic but specific for NIFTY
+        # NIFTY symbol is ^NSEI
+        nifty_prediction = predict_stock_trend("^NSEI", db)
+        
+        sentiment = "Neutral"
+        if nifty_prediction.get("prediction") == "UP":
+            sentiment = "Bullish"
+        elif nifty_prediction.get("prediction") == "DOWN":
+            sentiment = "Bearish"
+            
+        return {
+            "sentiment": sentiment,
+            "confidence": int(nifty_prediction.get("confidence", 0) * 100),
+            "vix": round(vix_val, 2),
+            "nifty_price": nifty_prediction.get("details", {}).get("current_price", 0)
+        }
+    except Exception as e:
+        print(f"Error fetching market sentiment: {e}")
+        return {
+            "sentiment": "Neutral",
+            "confidence": 0,
+            "vix": 0.0,
+            "error": str(e)
+        }

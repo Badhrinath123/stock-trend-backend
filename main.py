@@ -359,6 +359,13 @@ def get_popular_stocks():
     POPULAR_STOCKS_CACHE["data"] = response_data
     return response_data
 
+@app.get("/market/sentiment")
+def get_market_sentiment_api(db: Session = Depends(database.get_db)):
+    """
+    Returns real-time market sentiment (NIFTY 50 prediction) and VIX.
+    """
+    return ml_engine.get_market_sentiment(db)
+
 @app.get("/market/history/{symbol}")
 def get_market_history(symbol: str):
     """

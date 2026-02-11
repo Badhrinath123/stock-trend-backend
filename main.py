@@ -367,9 +367,10 @@ def get_market_sentiment_api(db: Session = Depends(database.get_db)):
     return ml_engine.get_market_sentiment(db)
 
 @app.get("/market/history/{symbol}")
-def get_market_history(symbol: str):
+def get_market_history(symbol: str, period: str = "1mo"):
     """
-    Returns historical price data for a symbol (default 1mo) for charting.
+    Returns historical price data for a symbol for charting.
+    Supported periods: 1d, 5d, 1mo, 6mo, 1y
     """
     try:
         # Validate/Suffix logic similar to ml_engine
@@ -383,12 +384,25 @@ def get_market_history(symbol: str):
                  symbol = symbol.upper() + ".NS"
         
         ticker = yf.Ticker(symbol)
-        hist = ticker.history(period="1mo")
+        
+        # Determine interval based on period
+        interval = "1d"
+        if period == "1d":
+            interval = "5m"
+        elif period == "5d":
+            interval = "15m"
+            
+        hist = ticker.history(period=period, interval=interval)
         
         data = []
         for index, row in hist.iterrows():
+            # For 1d, show time. For others, show date.
+            date_format = "%H:%M" if period == "1d" else "%d %b"
+            if period == "1y" or period == "6mo":
+                date_format = "%b %y"
+                
             data.append({
-                "date": index.strftime("%Y-%m-%d"),
+                "date": index.strftime(date_format),
                 "price": round(row['Close'], 2)
             })
             
